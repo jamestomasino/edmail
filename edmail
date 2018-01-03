@@ -1,0 +1,258 @@
+#!/bin/sh
+
+# This file defines the edmail mail user agent.
+
+# Copyright (C) 2017-2018 mlaine@sdfeu.org
+
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+#-----------------------------------------------------------------------
+
+function tint {
+    if [ "$1" -gt 0 -a "$1" -le "$n" 2>'/dev/null' ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function list {
+    n="$(find . -type f | wc -l)"
+    case "$n" in
+        0)
+            printf '%s\n' "$dir: no messages"
+            old=0
+            cursor=0
+            return ;;
+        1)
+            printf '%s\n' "$dir: $n message" ;;
+        *)
+            printf '%s\n' "$dir: $n messages" ;;
+    esac
+    if [ "$cmd" == 'l' ]; then
+        old=0
+    else
+        old=1
+        cursor=1
+    fi
+    c="${#n}"
+    i=0
+    for file in ./*; do
+        ((i++))
+        case "${dir##*/}" in
+            'tmp'|'out')
+                foo="$(awk '/^To:/{print;exit}' "$file")" ;;
+            *)
+                foo="$(awk '/^From:/{print;exit}' "$file")" ;;
+        esac
+        bar="${foo#* }"
+        name="${bar% <*}"
+        base="${file##*/}"
+        date="$(date --date="@${base%%.*}" '+%D %H:%M')"
+        lines="$(wc -l < "$file")"
+        bytes="$(wc -c < "$file")"
+        baz="$(awk '/^Subject:/{print;exit}' "$file")"
+        sub="${baz#* }"
+        if [ "$i" -eq "$cursor" ]; then
+            printf '%s%*s %-24s %s %s "%.*s"\n' '->' "$c"\
+                "$i" "$name" "$date" "$lines/$bytes" "$((28-c))" "$sub"
+        else
+            printf '%*s %-24s %s %s "%.*s"\n' "$((c+2))"\
+                "$i" "$name" "$date" "$lines/$bytes" "$((28-c))" "$sub"
+        fi
+    done
+}
+
+function page {
+    if [ -n "$cmd" ]; then
+        cursor="$cmd"
+    elif [ "$cursor" -lt "$n" ]; then
+        if [ "$old" -eq 0 ]; then
+            ((cursor++))
+        fi
+    elif [ "$cursor" -eq "$n" ]; then
+        if [ "$old" -eq 0 ]; then
+            printf 'EOF\n'
+            return
+        fi
+    fi
+    i=0
+    for file in ./*; do
+        ((i++))
+        if [ "$i" -eq "$cursor" ]; then
+            more "$file"
+            old=0
+        fi
+    done
+}
+
+function comp {
+    if [ "$args" ]; then
+        to="$args"
+    else
+        printf 'To: '
+        read to
+    fi
+    printf 'Subject: '
+    read sub
+    msg="$maildir/tmp/$(date +%s)"
+    ed -sp '*' "$msg"
+    if [ -f "$msg" ]; then
+        hdrs
+    fi
+}
+
+function hdrs {
+    # TODO add at least Message-ID and clean up
+    h1="Date: $(date '+%a, %d %b %Y %T %z')"
+    h2="From: $from"
+    h3="To: $to"
+    h4="Subject: $sub" 
+    printf '%s\n' '1i' "$h1" "$h2" "$h3" "$h4" '' '.' 'w' | ed -s "$msg"
+}
+
+function dlte {
+    if [ "$args" ] && ! tint "$args"; then
+        printf '?\n'
+        return 1
+    elif [ "$n" -eq 0 ]; then
+        printf 'EOF\n'
+        return 0
+    fi
+    i=0
+    for file in ./*; do
+        ((i++))
+        if [ "$i" -eq "$args" 2>'/dev/null'  ] ||
+           [ "$i" -eq "$cursor" -a ! "$args" ]
+        then
+            rm "$file"
+            if [ "$cursor" -eq "$n" ]; then
+                ((cursor--))
+            fi
+            break
+        fi
+    done
+    old=1
+    n="$(find . -type f | wc -l)"
+}
+
+function send {
+    if find "$maildir/tmp" -empty | read; then
+        printf '%s\n' "$maildir/tmp: no messages"
+        return
+    fi
+    i=0; j=0
+    for file in "$maildir/tmp"/*; do
+        ((j++))
+        if cat "$file" | msmtp -t; then
+            ((i++))
+            mv "$file" "$maildir/out"
+        else
+            printf '%s\n\n' "edmail: could not send $file"
+        fi
+    done
+    if [ "$i" -eq 0 ]; then
+        printf '%s\n' "no messages sent"
+    elif [ "$j" -eq 1 ]; then
+        printf '%s\n' "$i/$j message successfully sent"
+    else
+        printf '%s\n' "$i/$j messages successfully sent"
+    fi
+}
+
+function serv {
+    if [ ! "$cmd" ] || tint "$cmd"; then
+        page
+        return
+    fi
+    case "$cmd" in
+        'm')
+            comp ;;
+        't')
+            dir="$maildir/tmp" 
+            cd "$dir"
+            list ;;
+        'i')
+            dir="$maildir/new" 
+            cd "$dir"
+            list ;;
+        'o')
+            dir="$maildir/out" 
+            cd "$dir"
+            list ;;
+        'c')
+            dir="$maildir/cur" 
+            cd "$dir"
+            list ;;
+        'l')
+            cd "$dir"
+            list ;;
+        'd')
+            dlte ;;
+        'e')
+            # TODO edit
+            ;;
+        'p')
+            # TODO pipe
+            ;;
+        'n')
+            mpop ;;
+        'w')
+            send ;;
+        's')
+            # TODO save
+            ;;
+        'r')
+            # TODO reply
+            ;;
+        'f')
+            # TODO forward
+            ;;
+        'h')
+            man edmail ;;
+        'v')
+            printf '%s\n' 'edmail version 0.0.0' ;;
+        'q')
+            mv "$maildir/new"/* "$maildir/cur" 2>'/dev/null'
+            exit 0 ;;
+        'Q')
+            exit 0 ;;
+        '?')
+            # TODO syntax help
+            ;;
+        '!'*)
+            eval "${cmd:1} $args" ;;
+        *)
+            printf '?\n' ;;
+    esac
+}
+
+function main {
+    source "$HOME/.edmailrc"
+    cmd='i'; serv
+    while true; do
+        printf '& '
+        read cmd args
+        serv
+    done
+}
+
+main
+
