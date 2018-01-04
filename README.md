@@ -1,3 +1,5 @@
+_Fork of [mlaine's edmail repo](https://notabug.org/mlaine/edmail)_
+
 edmail
 ------
 
