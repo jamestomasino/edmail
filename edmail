@@ -58,24 +58,30 @@ function list {
         ((i++))
         case "${dir##*/}" in
             'tmp'|'out')
-                foo="$(awk '/^To:/{print;exit}' "$file")" ;;
+                name="$(awk '/^To:/{print;exit}' "$file")" ;;
             *)
-                foo="$(awk '/^From:/{print;exit}' "$file")" ;;
+                name="$(awk '/^From:/{print;exit}' "$file")" ;;
         esac
-        bar="${foo#* }"
-        name="${bar% <*}"
-        base="${file##*/}"
-        date="$(date --date="@${base%%[.-]*}" '+%D %H:%M')"
+        name="${name#* }"
+        name="${name% <*}"
+        name="${name:0:24}"
+        date="$(awk '/^Date:/{print;exit}' "$file")"
+        date="$(date --date="${date#* }" '+%D %H:%M')"
+        subj="$(awk '/^Subject:/{print;exit}' "$file")"
+        subj="${subj#* }"
         lines="$(wc -l < "$file")"
         bytes="$(wc -c < "$file")"
-        baz="$(awk '/^Subject:/{print;exit}' "$file")"
-        sub="${baz#* }"
-        if [ "$i" -eq "$cursor" ]; then
-            printf '%s%*s %-24s %s %s "%.*s"\n' '->' "$c"\
-                "$i" "$name" "$date" "$lines/$bytes" "$((28-c))" "$sub"
+        if [ "$lines" -lt 1000 -a "$bytes" -lt 10000 ]; then
+            size="$lines/$bytes"
         else
-            printf '%*s %-24s %s %s "%.*s"\n' "$((c+2))"\
-                "$i" "$name" "$date" "$lines/$bytes" "$((28-c))" "$sub"
+            size="$(du -h "$file" | cut -f1 )"
+        fi
+        if [ "$i" -eq "$cursor" ]; then
+            printf '%s%*s %-24s %s %-8s "%.*s"\n' '->' "$c"\
+                "$i" "$name" "$date" "$size" "$((26-c))" "$subj"
+        else
+            printf '%*s %-24s %s %-8s "%.*s"\n' "$((c+2))"\
+                "$i" "$name" "$date" "$size" "$((26-c))" "$subj"
         fi
     done
 }
@@ -111,7 +117,7 @@ function comp {
         read to
     fi
     printf 'Subject: '
-    read sub
+    read subj
     msg="$maildir/tmp/$(date +%s)-edmail@$HOSTNAME"
     ed -sp '*' "$msg"
     if [ -f "$msg" ]; then
@@ -124,7 +130,7 @@ function hdrs {
     h1="Date: $(date '+%a, %d %b %Y %T %z')"
     h2="From: $from"
     h3="To: $to"
-    h4="Subject: $sub" 
+    h4="Subject: $subj" 
     printf '%s\n' '0a'\
         "$h0" "$h1" "$h2" "$h3" "$h4"\
         '' '.' 'w' | ed -s "$msg"
