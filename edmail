@@ -125,7 +125,7 @@ function hdrs {
     h2="From: $from"
     h3="To: $to"
     h4="Subject: $sub" 
-    printf '%s\n' '1i'\
+    printf '%s\n' '0a'\
         "$h0" "$h1" "$h2" "$h3" "$h4"\
         '' '.' 'w' | ed -s "$msg"
 }
